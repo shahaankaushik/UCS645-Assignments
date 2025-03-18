@@ -1,0 +1,539 @@
+Q1
+
+#include <stdio.h> #include <stdlib.h>
+#include <cuda_runtime.h> #include <curand_kernel.h> #include <mpi.h>
+
+#define NUM_POINTS 1000000 // Number of points per process
+
+
+ global	void monteCarloPi(int *d_count, int numPoints, unsigned long seed) { int idx = threadIdx.x + blockIdx.x * blockDim.x;
+int localCount = 0; curandState state;
+curand_init(seed, idx, 0, &state);
+
+
+for (int i = 0; i < numPoints; i++) { float x = curand_uniform(&state); float y = curand_uniform(&state);
+if (x * x +  y * y <= 1.0f)
+localCount++;
+}
+
+
+atomicAdd(d_count, localCount);
+}
+
+
+int main(int argc, char **argv) { int rank, size;
+
+// Initialize MPI MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+ 
+MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+
+int pointsPerProcess = NUM_POINTS / size; int h_count = 0, totalCount = 0;
+int *d_count;
+
+
+cudaMalloc((void**)&d_count, sizeof(int)); cudaMemset(d_count, 0, sizeof(int));
+
+int threadsPerBlock = 256;
+int blocksPerGrid = (pointsPerProcess + threadsPerBlock - 1) / threadsPerBlock;
+
+
+// Launch CUDA Kernel
+monteCarloPi<<<blocksPerGrid, threadsPerBlock>>>(d_count, pointsPerProcess, rank); cudaMemcpy(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
+
+// Reduce results from all processes
+MPI_Reduce(&h_count, &totalCount, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+
+if (rank == 0) {
+float pi = 4.0f * totalCount / (NUM_POINTS); printf("Estimated Pi = %f\n", pi);
+}
+
+
+// Cleanup
+cudaFree(d_count); MPI_Finalize(); return 0;
+}
+ 
+Q2
+#include <stdio.h> #include <stdlib.h> #include <mpi.h> #include <omp.h>
+
+#define SIZE 70 // Matrix size
+
+
+void multiply_serial(double A[SIZE][SIZE], double B[SIZE][SIZE], double C[SIZE][SIZE]) { for (int i = 0; i < SIZE; i++) {
+for (int j = 0; j < SIZE; j++) { C[i][j] = 0;
+for (int k = 0; k < SIZE; k++) { C[i][j] += A[i][k] * B[k][j];
+}
+}
+}
+}
+
+
+void multiply_parallel(double A[SIZE][SIZE], double B[SIZE][SIZE], double C[SIZE][SIZE], int rank, int size) {
+int rows_per_process = SIZE / size;
+int start_row = rank * rows_per_process;
+int end_row = (rank == size - 1) ? SIZE : start_row + rows_per_process;
+
+
+for (int i = start_row; i < end_row; i++) { for (int j = 0; j < SIZE; j++) {
+C[i][j] = 0;
+for (int k = 0; k < SIZE; k++) { C[i][j] += A[i][k] * B[k][j];
+}
+ 
+}
+}
+
+
+// Gather results from all processes
+MPI_Gather(C[start_row], rows_per_process * SIZE, MPI_DOUBLE,
+C, rows_per_process * SIZE, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+}
+
+
+int main(int argc, char *argv[]) { int rank, size;
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+double A[SIZE][SIZE], B[SIZE][SIZE], C[SIZE][SIZE];
+
+
+if (rank == 0) {
+// Initialize matrices
+for (int i = 0; i < SIZE; i++) { for (int j = 0; j < SIZE; j++) {
+A[i][j] = rand() % 10;
+B[i][j] = rand() % 10;
+}
+}
+}
+
+
+// Broadcast matrices to all processes
+MPI_Bcast(A, SIZE * SIZE, MPI_DOUBLE, 0, MPI_COMM_WORLD); MPI_Bcast(B, SIZE * SIZE, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+double start_time, run_time;
+ 
+// Serial Execution (only by rank 0) if (rank == 0) {
+start_time = omp_get_wtime(); multiply_serial(A, B, C);
+run_time = omp_get_wtime() - start_time;
+printf("Serial Execution Time: %f seconds\n", run_time);
+}
+
+
+MPI_Barrier(MPI_COMM_WORLD); // Synchronize all processes before parallel execution
+
+
+// Parallel Execution
+start_time = omp_get_wtime(); multiply_parallel(A, B, C, rank, size); run_time = omp_get_wtime() - start_time;
+
+if (rank == 0) {
+printf("Parallel Execution Time: %f seconds\n", run_time);
+}
+
+
+MPI_Finalize(); return 0;
+}
+
+
+Q3
+#include <stdio.h> #include <stdlib.h> #include <mpi.h>
+
+// Swap function
+void swap(int *a, int *b) {
+ 
+int temp = *a;
+*a = *b;
+*b = temp;
+}
+
+
+// Odd-Even Sort Algorithm
+void odd_even_sort(int *arr, int n) { int sorted = 0;
+while (!sorted) { sorted = 1;
+
+// Odd Phase
+for (int i = 1; i < n - 1; i += 2) { if (arr[i] > arr[i + 1]) {
+swap(&arr[i], &arr[i + 1]); sorted = 0;
+}
+}
+
+
+// Even Phase
+for (int i = 0; i < n - 1; i += 2) { if (arr[i] > arr[i + 1]) {
+swap(&arr[i], &arr[i + 1]); sorted = 0;
+}
+}
+}
+}
+
+
+// Parallel Odd-Even Sort using MPI
+void parallel_odd_even_sort(int *local_arr, int local_n, int rank, int size) {
+ 
+int sorted = 0; MPI_Status status;
+
+while (!sorted) { sorted = 1;
+
+// Odd Phase
+if (rank % 2 == 1 && rank < size - 1) {
+MPI_Send(local_arr + local_n - 1, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+MPI_Recv(local_arr + local_n - 1, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, &status);
+} else if (rank % 2 == 0 && rank > 0) { int recv;
+MPI_Recv(&recv, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, &status); if (recv > local_arr[0]) {
+swap(&recv, &local_arr[0]); sorted = 0;
+}
+MPI_Send(&recv, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
+}
+
+
+// Even Phase
+if (rank % 2 == 0 && rank < size - 1) {
+MPI_Send(local_arr + local_n - 1, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+MPI_Recv(local_arr + local_n - 1, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, &status);
+} else if (rank % 2 == 1 && rank > 0) { int recv;
+MPI_Recv(&recv, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, &status); if (recv > local_arr[0]) {
+swap(&recv, &local_arr[0]); sorted = 0;
+}
+ 
+MPI_Send(&recv, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
+}
+
+
+// Check if all processes are sorted int global_sorted;
+MPI_Allreduce(&sorted, &global_sorted, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD); sorted = global_sorted;
+}
+}
+
+
+int main(int argc, char *argv[]) { int rank, size, n = 16;
+int arr[16] = {29, 10, 14, 37, 13, 26, 12, 30, 22, 11, 15, 32, 19, 31, 17, 25};
+
+
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+int local_n = n / size;
+int *local_arr = (int *)malloc(local_n * sizeof(int));
+
+
+// Scatter data to processes
+MPI_Scatter(arr, local_n, MPI_INT, local_arr, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+// Perform parallel sorting
+parallel_odd_even_sort(local_arr, local_n, rank, size);
+
+
+// Gather sorted subarrays
+MPI_Gather(local_arr, local_n, MPI_INT, arr, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+// Display sorted array
+ 
+if (rank == 0) {
+printf("Sorted Array: "); for (int i = 0; i < n; i++) { printf("%d ", arr[i]);
+}
+printf("\n");
+}
+
+
+free(local_arr); MPI_Finalize(); return 0;
+}
+
+
+Q4
+#include <stdio.h> #include <stdlib.h> #include <math.h> #include <mpi.h>
+
+#define N 10 // Grid size (N x N)
+#define ITERATIONS 500 // Number of time steps
+#define TEMP_SOURCE 100.0 // Heat source temperature
+
+
+void initialize_grid(double grid[N][N]) { for (int i = 0; i < N; i++) {
+for (int j = 0; j < N; j++) {
+grid[i][j] = 0.0; // Initialize all to zero
+}
+}
+grid[N / 2][N / 2] = TEMP_SOURCE; // Heat source in the center
+}
+ 
+void print_grid(double grid[N][N]) { for (int i = 0; i < N; i++) {
+for (int j = 0; j < N; j++) { printf("%6.2f ", grid[i][j]);
+}
+printf("\n");
+}
+}
+
+
+int main(int argc, char *argv[]) { int rank, size;
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+int rows_per_process = N / size; // Split grid into rows among processes double local_grid[N][N], new_grid[N][N];
+initialize_grid(local_grid);
+
+
+MPI_Status status;
+
+
+for (int iter = 0; iter < ITERATIONS; iter++) {
+// Exchange boundary rows with neighboring processes if (rank > 0) { // Send top row to above process
+MPI_Send(local_grid[0], N, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+MPI_Recv(local_grid[-1], N, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, &status);
+}
+if (rank < size - 1) { // Send bottom row to below process
+MPI_Send(local_grid[rows_per_process - 1], N, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+ 
+MPI_Recv(local_grid[rows_per_process], N, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, &status);
+}
+
+
+// Compute new values using the finite difference method for (int i = 1; i < rows_per_process - 1; i++) {
+for (int j = 1; j < N - 1; j++) {
+new_grid[i][j] = 0.25 * (local_grid[i - 1][j] + local_grid[i + 1][j] + local_grid[i][j - 1] + local_grid[i][j + 1]);
+}
+}
+
+
+// Copy the new values back to the local grid for (int i = 1; i < rows_per_process - 1; i++) {
+for (int j = 1; j < N - 1; j++) {
+local_grid[i][j] = new_grid[i][j];
+}
+}
+}
+
+
+// Gather the final grid at the root process double final_grid[N][N];
+MPI_Gather(local_grid, rows_per_process * N, MPI_DOUBLE, final_grid, rows_per_process * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+
+// Print the final heat distribution if (rank == 0) {
+printf("Final Heat Distribution:\n"); print_grid(final_grid);
+}
+
+
+MPI_Finalize();
+ 
+return 0;
+}
+
+
+Q5
+#include <stdio.h> #include <stdlib.h> #include <mpi.h>
+
+#define N 100 // Total number of elements
+
+
+int main(int argc, char *argv[]) { int rank, size;
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+int local_N = N / size; // Divide array equally among processes int local_sum = 0, global_sum = 0;
+int *data = NULL;
+
+
+// Only the root process initializes the full array if (rank == 0) {
+data = (int *)malloc(N * sizeof(int)); for (int i = 0; i < N; i++)
+data[i] = i + 1; // Initialize array with values 1 to N
+}
+
+
+// Each process gets a chunk of data
+int *local_data = (int *)malloc(local_N * sizeof(int));
+MPI_Scatter(data, local_N, MPI_INT, local_data, local_N, MPI_INT, 0, MPI_COMM_WORLD);
+ 
+// Compute local sum
+for (int i = 0; i < local_N; i++) local_sum += local_data[i];
+
+// Perform reduction to sum up all local sums
+MPI_Reduce(&local_sum, &global_sum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+
+// Root process prints the result if (rank == 0) {
+printf("Parallel Reduction: Sum = %d\n", global_sum);
+printf("Expected Sum = %d\n", (N * (N + 1)) / 2); // Formula for sum of first N natural numbers free(data);
+}
+
+
+free(local_data); MPI_Finalize(); return 0;
+}
+Q6
+#include <stdio.h> #include <stdlib.h> #include <mpi.h>
+
+#define N 100 // Total number of elements
+
+
+int main(int argc, char *argv[]) { int rank, size;
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+ 
+int local_N = N / size; // Divide the workload double local_dot = 0.0, global_dot = 0.0; double *A = NULL, *B = NULL;
+
+// Root process initializes the vectors if (rank == 0) {
+A = (double *)malloc(N * sizeof(double));
+B = (double *)malloc(N * sizeof(double)); for (int i = 0; i < N; i++) {
+A[i] = i + 1; // Example: 1, 2, 3, ..., N
+B[i] = (i + 1) * 2; // Example: 2, 4, 6, ..., 2N
+}
+}
+
+
+// Allocate memory for local parts of A and B
+double *local_A = (double *)malloc(local_N * sizeof(double)); double *local_B = (double *)malloc(local_N * sizeof(double));
+
+// Scatter the vectors to all processes
+MPI_Scatter(A, local_N, MPI_DOUBLE, local_A, local_N, MPI_DOUBLE, 0, MPI_COMM_WORLD); MPI_Scatter(B, local_N, MPI_DOUBLE, local_B, local_N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+// Compute the local dot product for (int i = 0; i < local_N; i++) {
+local_dot += local_A[i] * local_B[i];
+}
+
+
+// Perform reduction to sum up all local dot products
+MPI_Reduce(&local_dot, &global_dot, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+
+// Root process prints the result
+ 
+if (rank == 0) {
+printf("Parallel Dot Product: %f\n", global_dot);
+// Compute expected value for verification double expected_dot = 0.0;
+for (int i = 0; i < N; i++) {
+expected_dot += (i + 1) * ((i + 1) * 2);
+}
+printf("Expected Dot Product: %f\n", expected_dot); free(A);
+free(B);
+}
+
+
+// Free allocated memory free(local_A);
+free(local_B);
+
+
+MPI_Finalize(); return 0;
+}
+
+
+Q7
+#include <stdio.h> #include <stdlib.h> #include <mpi.h>
+
+#define N 16 // Size of the input array
+
+
+int main(int argc, char *argv[]) { int rank, size;
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+ 
+MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+
+int local_N = N / size; // Elements per process
+
+
+// Allocate memory for local data int *A = NULL;
+int *local_A = (int *)malloc(local_N * sizeof(int));
+int *local_prefix = (int *)malloc(local_N * sizeof(int));
+
+
+// Root process initializes the input array if (rank == 0) {
+A = (int *)malloc(N * sizeof(int)); for (int i = 0; i < N; i++) {
+A[i] = i + 1; // Example: 1, 2, 3, ..., N
+}
+}
+
+
+// Scatter the input data to all processes
+MPI_Scatter(A, local_N, MPI_INT, local_A, local_N, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+// Compute local prefix sum local_prefix[0] = local_A[0]; for (int i = 1; i < local_N; i++) {
+local_prefix[i] = local_prefix[i - 1] + local_A[i];
+}
+
+
+// Get the sum of previous processes' prefix sum int prev_sum = 0;
+MPI_Scan(&local_prefix[local_N - 1], &prev_sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+
+// Adjust local prefix sums (excluding rank 0)
+ 
+if (rank > 0) {
+for (int i = 0; i < local_N; i++) {
+local_prefix[i] += prev_sum - local_prefix[local_N - 1];
+}
+}
+
+
+// Gather the final results
+MPI_Gather(local_prefix, local_N, MPI_INT, A, local_N, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+// Print the final result in root process if (rank == 0) {
+printf("Prefix Sum: "); for (int i = 0; i < N; i++) {
+printf("%d ", A[i]);
+}
+printf("\n"); free(A);
+}
+
+
+free(local_A);
+free(local_prefix); MPI_Finalize(); return 0;
+}
+
+
+Q8
+#include <stdio.h> #include <stdlib.h> #include <mpi.h>
+
+#define N 4 // Matrix size (N x N)
+ 
+void printMatrix(int *matrix, int rows, int cols, const char *msg) { printf("%s\n", msg);
+for (int i = 0; i < rows; i++) { for (int j = 0; j < cols; j++) {
+printf("%3d ", matrix[i * cols + j]);
+}
+printf("\n");
+}
+}
+
+
+int main(int argc, char *argv[]) { int rank, size;
+MPI_Init(&argc, &argv);
+MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+int local_N = N / size; // Rows handled per process int *A = NULL, *B = NULL;
+int *local_A = (int *)malloc(local_N * N * sizeof(int)); int *local_B = (int *)malloc(local_N * N * sizeof(int));
+
+if (rank == 0) {
+// Allocate and initialize the full matrix
+A = (int *)malloc(N * N * sizeof(int));
+B = (int *)malloc(N * N * sizeof(int)); for (int i = 0; i < N; i++)
+for (int j = 0; j < N; j++)
+A[i * N + j] = i * N + j + 1; // Example: 1, 2, 3, ...
+
+
+printMatrix(A, N, N, "Original Matrix A:");
+ 
+}
+
+
+// Scatter rows of A to all processes
+MPI_Scatter(A, local_N * N, MPI_INT, local_A, local_N * N, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+// Transpose locally
+for (int i = 0; i < local_N; i++) for (int j = 0; j < N; j++)
+local_B[j * local_N + i] = local_A[i * N + j];
+
+
+// Gather transposed blocks into B
+MPI_Gather(local_B, local_N * N, MPI_INT, B, local_N * N, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+// Print transposed matrix in root if (rank == 0) {
+printMatrix(B, N, N, "Transposed Matrix B:"); free(A);
+free(B);
+}
+
+
+free(local_A); free(local_B);
+MPI_Finalize(); return 0;
+}
