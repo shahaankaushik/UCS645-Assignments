@@ -1,0 +1,269 @@
+Q1: Hello World Program eg. 
+
+#include <mpi.h> #include <stdio.h>
+
+int main(int argc, char** argv) {
+// Initialize the MPI environment MPI_Init(NULL, NULL);
+
+// Get the number of processes int world_size;
+MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+// Get the rank of the process int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+// Get the name of the processor
+char processor_name[MPI_MAX_PROCESSOR_NAME]; int name_len; MPI_Get_processor_name(processor_name, &name_len);
+
+// Print off a hello world message
+printf("Hello world from processor %s, rank %d out of %d processors\n", processor_name, world_rank, world_size);
+
+// Finalize the MPI environment. MPI_Finalize();
+}
+ 
+Q2: MPI Send / Receive Program
+
+#include <mpi.h> #include <stdio.h>
+
+int main(int argc, char** argv) {
+// Initialize the MPI environment MPI_Init(&argc, &argv);
+
+// Get the rank and size int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank); int world_size; MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+// Ensure we have at least 2 processes if (world_size < 2) {
+if (world_rank == 0) {
+printf("This program requires at least 2 processes.\n");
+}
+MPI_Finalize(); return 1;
+}
+
+int number;
+if (world_rank == 0) {
+// Process 0 sends a number to Process 1 number = -1;
+MPI_Send(&number, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+printf("Process 0 sent number %d to process 1\n", number);
+} else if (world_rank == 1) {
+// Process 1 receives the number from Process 0
+MPI_Recv(&number, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+printf("Process 1 received number %d from process 0\n", number);
+}
+
+// Finalize the MPI environment MPI_Finalize();
+return 0;
+}
+ 
+Q3: MPI Ping Pong
+
+#include <mpi.h> #include <stdio.h>
+#define PING_PONG_LIMIT 10 // Define the maximum ping-pong count int main(int argc, char** argv) {
+// Initialize the MPI environment
+MPI_Init(&argc, &argv);
+
+// Get the rank and size int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank); int world_size; MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+// Ensure there are exactly 2 processes if (world_size != 2) {
+if (world_rank == 0) {
+printf("This program requires exactly 2 processes.\n");
+}
+MPI_Finalize(); return 1;
+}
+
+int ping_pong_count = 0;
+int partner_rank = (world_rank + 1) % 2;
+
+while (ping_pong_count < PING_PONG_LIMIT) { if (world_rank == ping_pong_count % 2) {
+// Increment the count before sending ping_pong_count++;
+MPI_Send(&ping_pong_count, 1, MPI_INT, partner_rank, 0, MPI_COMM_WORLD); printf("Process %d sent and incremented ping_pong_count %d to process %d\n",
+world_rank, ping_pong_count, partner_rank);
+} else {
+MPI_Recv(&ping_pong_count, 1, MPI_INT, partner_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+printf("Process %d received ping_pong_count %d from process %d\n", world_rank, ping_pong_count, partner_rank);
+}
+}
+ 
+// Finalize the MPI environment MPI_Finalize();
+return 0;
+}
+
+
+Ques 4: Ring Program
+
+#include <mpi.h> #include <stdio.h>
+
+int main(int argc, char** argv) {
+// Initialize the MPI environment MPI_Init(&argc, &argv);
+
+// Get the rank and size int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank); int world_size; MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+int token;
+
+if (world_rank != 0) {
+// Receive token from the previous process
+MPI_Recv(&token, 1, MPI_INT, world_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+printf("Process %d received token %d from process %d\n", world_rank, token, world_rank -
+1);
+} else {
+// Process 0 initializes the token token = -1;
+}
+
+// Send the token to the next process (looping back for the last process) MPI_Send(&token, 1, MPI_INT, (world_rank + 1) % world_size, 0, MPI_COMM_WORLD);
+
+// Process 0 receives back the token from the last process if (world_rank == 0) {
+MPI_Recv(&token, 1, MPI_INT, world_size - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+printf("Process %d received token %d from process %d\n", world_rank, token, world_size -
+1);
+}
+ 
+// Finalize the MPI environment MPI_Finalize();
+return 0;
+}
+
+Q5: Querying MPI_status Structure #include <mpi.h>
+#include <stdio.h> #include <stdlib.h> #include <time.h>
+#define MAX_NUMBERS 100 // Maximum number of integers to send int main(int argc, char** argv) {
+// Initialize the MPI environment
+MPI_Init(&argc, &argv);
+
+// Get the rank and size int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank); int world_size; MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+if (world_size < 2) {
+if (world_rank == 0) {
+printf("This program requires at least 2 processes.\n");
+}
+MPI_Finalize(); return 1;
+}
+
+int numbers[MAX_NUMBERS]; // Array to store numbers
+int number_amount;	// Actual count of numbers sent/received
+
+if (world_rank == 0) {
+// Initialize random seed srand(time(NULL));
+
+// Generate a random number of elements to send (between 1 and MAX_NUMBERS) number_amount = (rand() / (float)RAND_MAX) * MAX_NUMBERS;
+ 
+// Fill the array with random values
+for (int i = 0; i < number_amount; i++) {
+numbers[i] = rand() % 100; // Random numbers between 0 and 99
+}
+
+// Send the numbers to Process 1
+MPI_Send(numbers, number_amount, MPI_INT, 1, 0, MPI_COMM_WORLD); printf("Process 0 sent %d numbers to Process 1\n", number_amount);
+}
+else if (world_rank == 1) { MPI_Status status;
+
+// Receive at most MAX_NUMBERS from Process 0
+MPI_Recv(numbers, MAX_NUMBERS, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+
+// Determine how many numbers were actually received MPI_Get_count(&status, MPI_INT, &number_amount);
+
+// Print the received information
+printf("Process 1 received %d numbers from Process 0. Message source = %d, tag =
+%d\n",
+number_amount, status.MPI_SOURCE, status.MPI_TAG);
+}
+
+// Finalize the MPI environment MPI_Finalize();
+return 0;
+}
+ 
+Q6: MPI_Probe to find out the message size
+
+#include <mpi.h> #include <stdio.h> #include <stdlib.h> #include <time.h>
+
+int main(int argc, char** argv) {
+// Initialize the MPI environment MPI_Init(&argc, &argv);
+
+// Get the rank and size int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank); int world_size; MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+if (world_size < 2) {
+if (world_rank == 0) {
+printf("This program requires at least 2 processes.\n");
+}
+MPI_Finalize(); return 1;
+}
+int number_amount; if (world_rank == 0) {
+const int MAX_NUMBERS = 100; int numbers[MAX_NUMBERS];
+
+// Initialize random seed srand(time(NULL));
+
+// Generate a random number of elements to send (between 1 and MAX_NUMBERS) number_amount = (rand() / (float)RAND_MAX) * MAX_NUMBERS;
+
+// Fill the array with random values
+for (int i = 0; i < number_amount; i++) {
+numbers[i] = rand() % 100; // Random numbers between 0 and 99
+}
+
+// Send the numbers to Process 1
+MPI_Send(numbers, number_amount, MPI_INT, 1, 0, MPI_COMM_WORLD);
+ 
+printf("Process 0 sent %d numbers to Process 1\n", number_amount);
+}
+else if (world_rank == 1) { MPI_Status status;
+
+// Probe for an incoming message from Process 0 MPI_Probe(0, 0, MPI_COMM_WORLD, &status);
+
+// Get the message size
+MPI_Get_count(&status, MPI_INT, &number_amount);
+
+// Dynamically allocate a buffer for the incoming numbers int* number_buf = (int*)malloc(sizeof(int) * number_amount);
+
+// Receive the message using the allocated buffer
+MPI_Recv(number_buf, number_amount, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+printf("Process 1 dynamically received %d numbers from Process 0.\n", number_amount);
+
+// Free the allocated memory free(number_buf);
+}
+
+// Finalize the MPI environment MPI_Finalize();
+return 0;
+}
+ 
+Q7: Random Walk with MPI
+
+#include <mpi.h> #include <stdio.h> #include <stdlib.h> #include <time.h>
+
+#define MAX_STEPS 10 // Maximum number of steps each walker can take #define WALKER_ID 0 // Process 0 acts as the walker
+
+int main(int argc, char** argv) {
+// Initialize the MPI environment MPI_Init(&argc, &argv);
+
+// Get the rank and size int world_rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &world_rank); int world_size; MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+if (world_size < 2) {
+if (world_rank == 0) {
+printf("This program requires at least 2 processes.\n");
+}
+MPI_Finalize(); return 1;
+}
+
+int position = 0; // Walker's position int step;
+
+if (world_rank == WALKER_ID) {
+srand(time(NULL)); // Seed random number generator
+
+for (int i = 0; i < MAX_STEPS; i++) {
+// Randomly decide step: -1 (left) or +1 (right) step = (rand() % 2 == 0) ? -1 : 1;
+position += step;
+
+printf("Walker at step %d, new position: %d\n", i + 1, position);
+
+// Send the position to the next process
+MPI_Send(&position, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+}
+ 
+}
+else if (world_rank == 1) {
+for (int i = 0; i < MAX_STEPS; i++) {
+MPI_Recv(&position, 1, MPI_INT, WALKER_ID, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+printf("Observer received position: %d\n", position);
+}
+}
+
+// Finalize the MPI environment MPI_Finalize();
+return 0;
+}
