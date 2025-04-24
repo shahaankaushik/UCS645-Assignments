@@ -1,0 +1,137 @@
+ Part 1: Square Root vs. Addition and Multiplication — Concept
+This is a conceptual explanation (no code here, just context):
+
+Square root (sqrtf) is a more complex and time-consuming operation than addition (+) or multiplication (*).
+
+On a GPU, operations like addition/multiplication are faster due to their simple binary nature.
+
+sqrtf(x) often requires hardware approximation and iteration, which takes more clock cycles.
+
+
+ Part 2:
+
+// sqrt_kernel.cu
+#include <iostream>
+#include <cmath>
+#include <cuda.h>
+#include <chrono>
+
+__global__ void computeSqrt(float* A, float* C, int N) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) {
+        C[idx] = sqrtf(A[idx]);
+    }
+}
+
+void runSqrtKernel(int N) {
+    float *h_A, *h_C;
+    float *d_A, *d_C;
+
+    size_t size = N * sizeof(float);
+    h_A = (float*)malloc(size);
+    h_C = (float*)malloc(size);
+
+    for (int i = 0; i < N; i++) h_A[i] = i + 1;
+
+    cudaMalloc(&d_A, size);
+    cudaMalloc(&d_C, size);
+    cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
+
+    int threads = 256;
+    int blocks = (N + threads - 1) / threads;
+
+    auto start = std::chrono::high_resolution_clock::now();
+    computeSqrt<<<blocks, threads>>>(d_A, d_C, N);
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    std::cout << "Square Root Time for N = " << N << ": " << elapsed.count() << " ms" << std::endl;
+
+    cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
+
+    free(h_A); free(h_C);
+    cudaFree(d_A); cudaFree(d_C);
+}
+
+int main() {
+    runSqrtKernel(50000);
+    runSqrtKernel(500000);
+    runSqrtKernel(5000000);
+    runSqrtKernel(50000000);
+    return 0;
+}
+
+
+ Part 3:
+
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <chrono>
+#include <cuda_runtime.h>
+
+// CUDA kernel function to compute the square root of each element
+__global__ void squareRootKernel(const float* in, float* out, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        out[idx] = sqrtf(in[idx]);
+    }
+}
+
+int main() {
+    std::vector<int> arraySizes = {50000, 500000, 5000000, 50000000};
+
+    for (int size : arraySizes) {
+        // Host memory allocation
+        std::vector<float> A(size);
+        std::vector<float> C(size);
+
+        // Initialize input vector A
+        for (int i = 0; i < size; ++i) {
+            A[i] = static_cast<float>(i); // Example initialization
+        }
+
+        // Device memory allocation
+        float* dA;
+        float* dC;
+        cudaMalloc((void**)&dA, size * sizeof(float));
+        cudaMalloc((void**)&dC, size * sizeof(float));
+
+        // Copy data from host to device
+        cudaMemcpy(dA, A.data(), size * sizeof(float), cudaMemcpyHostToDevice);
+
+        // Configure thread block and grid dimensions
+        int blockSize = 256;
+        int numBlocks = (size + blockSize - 1) / blockSize;
+
+        // Launch the CUDA kernel
+        auto start = std::chrono::high_resolution_clock::now();
+        squareRootKernel<<<numBlocks, blockSize>>>(dA, dC, size);
+        cudaDeviceSynchronize(); // Wait for the kernel to finish
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> duration = end - start;
+
+        // Copy results from device to host
+        cudaMemcpy(C.data(), dC, size * sizeof(float), cudaMemcpyDeviceToHost);
+
+        std::cout << "Time for array size " << size << ": " << duration.count() << " seconds" << std::endl;
+
+        // Free device memory
+        cudaFree(dA);
+        cudaFree(dC);
+
+        // You can optionally verify the results here
+        // for (int i = 0; i < 10; ++i) {
+        //     std::cout << "sqrt(" << A[i] << ") = " << C[i] << std::endl;
+        // }
+    }
+
+    return 0;
+}
+
+Key Points:
+
+Timing Output: The core of Part 3 is the std::cout line within the loop:
+
+std::cout << "Time for array size " << size << ": " << duration.count() << " seconds" << std::endl;
